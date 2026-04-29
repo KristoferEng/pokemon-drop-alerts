@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: pokemon-drop-alerts
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pokemon-drop-alerts-db
+          property: connectionString
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_VERIFY_SERVICE_SID
+        sync: false
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
+
+  - type: worker
+    name: pokemon-drop-alerts-worker
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci
+    startCommand: npm run worker
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pokemon-drop-alerts-db
+          property: connectionString
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
+      - key: WORKER_CYCLE_SECONDS
+        value: "180"
+      - key: ALERT_COOLDOWN_HOURS
+        value: "6"
+      - key: DRY_RUN
+        value: "false"
+      - key: BESTBUY_API_KEY
+        sync: false
+
+databases:
+  - name: pokemon-drop-alerts-db
+    plan: basic-256mb
+    region: oregon
+    postgresMajorVersion: "16"
