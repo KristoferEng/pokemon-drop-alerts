@@ -22,6 +22,7 @@ export default function SignupCard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [maskedPhone, setMaskedPhone] = useState("");
+  const [devCode, setDevCode] = useState<string | null>(null);
 
   async function handlePhoneSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,6 +44,7 @@ export default function SignupCard() {
         return;
       }
       setMaskedPhone(data.maskedPhone);
+      setDevCode(data.devCode ?? null);
       setStep("code");
     } catch {
       setError("Network error. Please try again.");
@@ -103,6 +105,13 @@ export default function SignupCard() {
         <p className="mb-5 text-sm text-white/60">
           We sent a 6-digit code to {maskedPhone}.
         </p>
+        {devCode && (
+          <div className="mb-4 rounded-xl border border-yellow-300/30 bg-yellow-300/10 px-3 py-2 text-xs text-yellow-200">
+            <span className="font-semibold">DEV MODE:</span> code is{" "}
+            <span className="font-mono text-base text-yellow-100">{devCode}</span>{" "}
+            (no SMS sent)
+          </div>
+        )}
         <input
           inputMode="numeric"
           pattern="[0-9]*"

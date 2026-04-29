@@ -18,6 +18,9 @@ export const subscribers = pgTable(
     optedInAt: timestamp("opted_in_at", { withTimezone: true }),
     optInIp: text("opt_in_ip"),
     unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
+    verificationCodeHash: text("verification_code_hash"),
+    verificationExpiresAt: timestamp("verification_expires_at", { withTimezone: true }),
+    verificationAttempts: integer("verification_attempts").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

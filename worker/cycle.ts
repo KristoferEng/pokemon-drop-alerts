@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../lib/db/client";
 import { classifyProduct } from "../lib/classifier";
-import { sendAlert } from "../lib/twilio";
+import { sendSMS } from "../lib/sms";
 import { log } from "../lib/log";
 import { SCRAPERS } from "./retailers";
 import { RETAILER_DOMAIN, type RetailerId, type ScrapedProduct } from "./types";
@@ -153,23 +153,30 @@ async function dispatchAlerts(events: AlertEvent[]) {
     for (const sub of recipients) {
       if (DRY_RUN) {
         log.info("alert.dry_run", { phone: sub.phone, body });
-      } else {
-        try {
-          const msg = await sendAlert(sub.phone, body);
-          // Log first event for audit trail
-          await db.insert(schema.alertsSent).values({
-            subscriberId: sub.id,
-            productId: retailerEvents[0].productId,
-            reason: retailerEvents[0].reason,
-            twilioMessageSid: msg.sid,
-          });
-          texts++;
-        } catch (err) {
-          log.error("alert.send_failed", {
+        continue;
+      }
+      try {
+        const sent = await sendSMS(sub.phone, body);
+        if (!sent.ok) {
+          log.warn("alert.send_failed", {
             phone: sub.phone.slice(0, 5) + "…",
-            err: String(err),
+            provider: sent.provider,
+            error: sent.error,
           });
+          continue;
         }
+        await db.insert(schema.alertsSent).values({
+          subscriberId: sub.id,
+          productId: retailerEvents[0].productId,
+          reason: retailerEvents[0].reason,
+          twilioMessageSid: sent.messageId,
+        });
+        texts++;
+      } catch (err) {
+        log.error("alert.send_failed", {
+          phone: sub.phone.slice(0, 5) + "…",
+          err: String(err),
+        });
       }
     }
   }

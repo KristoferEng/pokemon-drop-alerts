@@ -3,11 +3,13 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { parseUSPhone } from "@/lib/phone";
-import { checkVerification } from "@/lib/twilio";
+import { hashOTP, isExpired } from "@/lib/otp";
 import { log } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const MAX_ATTEMPTS = 5;
 
 const Body = z.object({
   phone: z.string().min(1).max(40),
@@ -29,12 +31,37 @@ export async function POST(req: Request) {
   const e164 = phoneResult.e164;
 
   try {
-    const check = await checkVerification(e164, parsed.code);
-    if (check.status !== "approved") {
+    const rows = await db
+      .select()
+      .from(schema.subscribers)
+      .where(eq(schema.subscribers.phone, e164))
+      .limit(1);
+
+    if (rows.length === 0) {
+      return NextResponse.json({ error: "No code on file. Send a new one." }, { status: 400 });
+    }
+    const sub = rows[0];
+
+    if (!sub.verificationCodeHash) {
+      return NextResponse.json({ error: "No code on file. Send a new one." }, { status: 400 });
+    }
+    if (isExpired(sub.verificationExpiresAt)) {
+      return NextResponse.json({ error: "Code expired. Send a new one." }, { status: 400 });
+    }
+    if ((sub.verificationAttempts ?? 0) >= MAX_ATTEMPTS) {
       return NextResponse.json(
-        { error: "That code didn't work. Try again or request a new one." },
-        { status: 400 },
+        { error: "Too many attempts. Send a new code." },
+        { status: 429 },
       );
+    }
+
+    const candidate = hashOTP(parsed.code, e164);
+    if (candidate !== sub.verificationCodeHash) {
+      await db
+        .update(schema.subscribers)
+        .set({ verificationAttempts: (sub.verificationAttempts ?? 0) + 1 })
+        .where(eq(schema.subscribers.phone, e164));
+      return NextResponse.json({ error: "That code didn't work. Try again." }, { status: 400 });
     }
 
     await db
@@ -43,6 +70,9 @@ export async function POST(req: Request) {
         verified: true,
         optedInAt: new Date(),
         unsubscribedAt: null,
+        verificationCodeHash: null,
+        verificationExpiresAt: null,
+        verificationAttempts: 0,
       })
       .where(eq(schema.subscribers.phone, e164));
 
@@ -50,9 +80,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (err) {
     log.error("verify.error", { err: String(err) });
-    return NextResponse.json(
-      { error: "Could not verify. Try again." },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Could not verify. Try again." }, { status: 500 });
   }
 }
