@@ -1,0 +1,31 @@
+name: Trigger scrape cycle
+
+on:
+  schedule:
+    # Every 10 minutes (GitHub free-tier minimum is 5 min, but 10 is plenty)
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: cron-cycle
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: POST /api/cron/cycle
+        env:
+          CYCLE_URL: ${{ secrets.CYCLE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CYCLE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::CYCLE_URL and CRON_SECRET secrets must be set in repo settings"
+            exit 1
+          fi
+          curl --fail-with-body --show-error --silent \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            --max-time 300 \
+            "$CYCLE_URL"

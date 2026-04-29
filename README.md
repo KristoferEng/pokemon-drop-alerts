@@ -142,9 +142,9 @@ In Render: **New → Blueprint → connect repo**, or use the API. Then in the d
    npm run db:migrate
    npm run db:seed
    ```
-3. Set up an external cron to ping the cycle endpoint every 3–5 minutes:
-   - Free option: [cron-job.org](https://cron-job.org) → New cron job → URL `https://<your-service>.onrender.com/api/cron/cycle`, method `POST`, interval `*/5 * * * *`, custom header `Authorization: Bearer <CRON_SECRET>` (copy from Render env vars).
-   - GitHub Actions option: a `schedule:` workflow with `curl -X POST -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" https://<your-service>.onrender.com/api/cron/cycle`.
+3. Set up an external cron to ping the cycle endpoint every 5–10 minutes. Two free options included:
+   - **GitHub Actions** (`.github/workflows/cron-cycle.yml`, runs every 10 min): in the repo settings → Secrets and variables → Actions, add `CYCLE_URL` (`https://<your-service>.onrender.com/api/cron/cycle`) and `CRON_SECRET` (copy from Render env vars). Done.
+   - **cron-job.org**: New cron job → URL `https://<your-service>.onrender.com/api/cron/cycle`, method `POST`, interval `*/5 * * * *`, custom header `Authorization: Bearer <CRON_SECRET>`.
 
 The cycle endpoint runs the same scrape→classify→alert flow as the long-running worker, just on demand.
 
