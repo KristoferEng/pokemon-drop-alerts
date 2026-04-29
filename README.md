@@ -22,7 +22,9 @@ Card products only — booster boxes, ETBs, tins, blisters, collection boxes, et
 - **Next.js 16** (App Router) + **TypeScript** + **Tailwind v4** for the signup page
 - **Postgres** + **Drizzle ORM** for subscribers, products, stock state
 - **Twilio Verify** for opt-in confirmation, **Twilio Messaging Service** for alerts
-- A separate **Node worker** that polls each retailer on a cycle, diffs against DB, and dispatches alerts
+- A scrape **cycle** that polls each retailer, diffs against DB, and dispatches alerts. Run it two ways:
+  - Long-running `npm run worker` (best for VPS / Render Background Worker on a paid plan)
+  - HTTP `POST /api/cron/cycle` triggered by an external cron (free path; works on Render free tier)
 
 ```
 .
@@ -124,31 +126,46 @@ Scraper notes:
 
 ---
 
-## Deploying to Render
+## Deploying to Render (free tier)
 
-`render.yaml` is a Render Blueprint. From a fresh GitHub repo:
+`render.yaml` provisions a free Web service + free Postgres. (Background workers require a paid plan, so on free tier we trigger the scrape cycle via an external HTTP cron — see below.)
 
 ```bash
 git push origin main
 ```
 
-Then in Render: **New → Blueprint → connect repo**. It will provision:
+In Render: **New → Blueprint → connect repo**, or use the API. Then in the dashboard:
 
-- Web service (`pokemon-drop-alerts`)
-- Background worker (`pokemon-drop-alerts-worker`)
-- Postgres database (`pokemon-drop-alerts-db`)
-
-After provisioning, in the Render dashboard:
-
-1. Set the secret env vars on **both** services: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `TWILIO_MESSAGING_SERVICE_SID`, `BESTBUY_API_KEY`.
-2. Open a Render Shell on the web service and run:
+1. Set secret env vars on the web service: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `TWILIO_MESSAGING_SERVICE_SID`, `BESTBUY_API_KEY`. `CRON_SECRET` and `DATABASE_URL` are auto-generated/wired by the Blueprint.
+2. Open Shell and run:
    ```bash
    npm run db:migrate
-   npm run db:seed       # one dry-run scrape so first real worker cycle isn't all "new release"
+   npm run db:seed
    ```
-3. Trigger a deploy on the worker service so it picks up the seeded DB.
+3. Set up an external cron to ping the cycle endpoint every 3–5 minutes:
+   - Free option: [cron-job.org](https://cron-job.org) → New cron job → URL `https://<your-service>.onrender.com/api/cron/cycle`, method `POST`, interval `*/5 * * * *`, custom header `Authorization: Bearer <CRON_SECRET>` (copy from Render env vars).
+   - GitHub Actions option: a `schedule:` workflow with `curl -X POST -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" https://<your-service>.onrender.com/api/cron/cycle`.
 
-That's it.
+The cycle endpoint runs the same scrape→classify→alert flow as the long-running worker, just on demand.
+
+### If you want the long-running worker instead (paid plan)
+
+Add a worker service block to `render.yaml`:
+
+```yaml
+- type: worker
+  name: pokemon-drop-alerts-worker
+  runtime: node
+  plan: starter
+  buildCommand: npm ci
+  startCommand: npm run worker
+  envVars:
+    - key: DATABASE_URL
+      fromDatabase: { name: pokemon-drop-alerts-db, property: connectionString }
+    # ... all the TWILIO_* vars
+```
+
+The worker code is already in `worker/index.ts`.
 
 ---
 
