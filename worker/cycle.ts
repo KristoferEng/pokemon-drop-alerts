@@ -2,6 +2,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../lib/db/client";
 import { classifyProduct } from "../lib/classifier";
 import { sendSMS } from "../lib/sms";
+import { sendEmail } from "../lib/email";
 import { log } from "../lib/log";
 import { SCRAPERS } from "./retailers";
 import { RETAILER_DOMAIN, type RetailerId, type ScrapedProduct } from "./types";
@@ -22,6 +23,11 @@ type AlertEvent = {
 
 function alertText(retailer: RetailerId): string {
   return `Pokemon drop at ${RETAILER_DOMAIN[retailer]} - good luck!`;
+}
+
+function alertEmailBody(retailer: RetailerId, events: AlertEvent[]): string {
+  const products = events.map((e) => `• ${e.productName}`).join("\n");
+  return `A Pokémon TCG card product just dropped at ${RETAILER_DOMAIN[retailer]}:\n\n${products}\n\nGood luck out there.\n\n— Pokémon Drop Alerts`;
 }
 
 async function processRetailer(scraperId: RetailerId, scraped: ScrapedProduct[]): Promise<AlertEvent[]> {
@@ -136,7 +142,7 @@ async function dispatchAlerts(events: AlertEvent[]) {
     );
 
   if (TEST_PHONES.length > 0) {
-    recipients = recipients.filter((r) => TEST_PHONES.includes(r.phone));
+    recipients = recipients.filter((r) => r.phone !== null && TEST_PHONES.includes(r.phone));
     log.info("worker.test_phones_filter", { count: recipients.length });
   }
 
@@ -152,31 +158,51 @@ async function dispatchAlerts(events: AlertEvent[]) {
 
     for (const sub of recipients) {
       if (DRY_RUN) {
-        log.info("alert.dry_run", { phone: sub.phone, body });
+        log.info("alert.dry_run", { id: sub.id, body });
         continue;
       }
       try {
-        const sent = await sendSMS(sub.phone, body);
-        if (!sent.ok) {
-          log.warn("alert.send_failed", {
-            phone: sub.phone.slice(0, 5) + "…",
-            provider: sent.provider,
-            error: sent.error,
-          });
+        let messageId: string | undefined;
+        if (sub.email) {
+          const sent = await sendEmail(
+            sub.email,
+            `Pokémon drop at ${RETAILER_DOMAIN[retailer]}`,
+            alertEmailBody(retailer, retailerEvents),
+          );
+          if (!sent.ok) {
+            log.warn("alert.send_failed", {
+              kind: "email",
+              id: sub.id,
+              provider: sent.provider,
+              error: sent.error,
+            });
+            continue;
+          }
+          messageId = sent.messageId;
+        } else if (sub.phone) {
+          const sent = await sendSMS(sub.phone, body);
+          if (!sent.ok) {
+            log.warn("alert.send_failed", {
+              kind: "sms",
+              id: sub.id,
+              provider: sent.provider,
+              error: sent.error,
+            });
+            continue;
+          }
+          messageId = sent.messageId;
+        } else {
           continue;
         }
         await db.insert(schema.alertsSent).values({
           subscriberId: sub.id,
           productId: retailerEvents[0].productId,
           reason: retailerEvents[0].reason,
-          twilioMessageSid: sent.messageId,
+          twilioMessageSid: messageId,
         });
         texts++;
       } catch (err) {
-        log.error("alert.send_failed", {
-          phone: sub.phone.slice(0, 5) + "…",
-          err: String(err),
-        });
+        log.error("alert.send_failed", { id: sub.id, err: String(err) });
       }
     }
   }

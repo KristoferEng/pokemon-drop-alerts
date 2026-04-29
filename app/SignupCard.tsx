@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 
-type Step = "phone" | "code" | "done";
+type Step = "input" | "code" | "done";
+
+const CHANNEL = (process.env.NEXT_PUBLIC_CHANNEL ?? "email") as "email" | "sms";
 
 function formatPhoneInput(raw: string): string {
   const digits = raw.replace(/\D/g, "").slice(0, 10);
@@ -15,16 +17,21 @@ function formatPhoneInput(raw: string): string {
 }
 
 export default function SignupCard() {
-  const [step, setStep] = useState<Step>("phone");
+  const [step, setStep] = useState<Step>("input");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [maskedPhone, setMaskedPhone] = useState("");
+  const [maskedTarget, setMaskedTarget] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [channelUsed, setChannelUsed] = useState<"email" | "sms">(CHANNEL);
 
-  async function handlePhoneSubmit(e: React.FormEvent) {
+  const inputReady =
+    CHANNEL === "email" ? email.includes("@") && email.length > 4 : phone.replace(/\D/g, "").length === 10;
+
+  async function handleInputSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!consent) {
@@ -33,18 +40,20 @@ export default function SignupCard() {
     }
     setLoading(true);
     try {
+      const body = CHANNEL === "email" ? { email } : { phone };
       const res = await fetch("/api/signup", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Something went wrong");
         return;
       }
-      setMaskedPhone(data.maskedPhone);
+      setMaskedTarget(data.maskedTarget ?? data.maskedPhone);
       setDevCode(data.devCode ?? null);
+      setChannelUsed(data.channel ?? CHANNEL);
       setStep("code");
     } catch {
       setError("Network error. Please try again.");
@@ -58,10 +67,12 @@ export default function SignupCard() {
     setError(null);
     setLoading(true);
     try {
+      const body =
+        channelUsed === "email" ? { email, code } : { phone, code };
       const res = await fetch("/api/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ phone, code }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -86,10 +97,14 @@ export default function SignupCard() {
           <h2 className="text-lg font-bold">You&apos;re in.</h2>
         </div>
         <p className="text-sm text-white/70">
-          We&apos;ll text {maskedPhone} the second a Pokémon TCG card product
-          drops at one of the six retailers. Reply{" "}
-          <span className="font-mono text-white">STOP</span> any time to opt
-          out.
+          We&apos;ll {channelUsed === "email" ? "email" : "text"} {maskedTarget} the
+          second a Pokémon TCG card product drops at one of the six retailers.
+          {channelUsed === "sms" && (
+            <>
+              {" "}Reply <span className="font-mono text-white">STOP</span> any
+              time to opt out.
+            </>
+          )}
         </p>
       </div>
     );
@@ -97,19 +112,16 @@ export default function SignupCard() {
 
   if (step === "code") {
     return (
-      <form
-        onSubmit={handleCodeSubmit}
-        className="card rounded-2xl p-6 text-left"
-      >
+      <form onSubmit={handleCodeSubmit} className="card rounded-2xl p-6 text-left">
         <h2 className="mb-1 text-lg font-bold">Enter the code</h2>
         <p className="mb-5 text-sm text-white/60">
-          We sent a 6-digit code to {maskedPhone}.
+          We sent a 6-digit code to {maskedTarget}.
         </p>
         {devCode && (
           <div className="mb-4 rounded-xl border border-yellow-300/30 bg-yellow-300/10 px-3 py-2 text-xs text-yellow-200">
             <span className="font-semibold">DEV MODE:</span> code is{" "}
             <span className="font-mono text-base text-yellow-100">{devCode}</span>{" "}
-            (no SMS sent)
+            (no {channelUsed === "email" ? "email" : "SMS"} sent)
           </div>
         )}
         <input
@@ -138,45 +150,67 @@ export default function SignupCard() {
         <button
           type="button"
           onClick={() => {
-            setStep("phone");
+            setStep("input");
             setError(null);
             setCode("");
+            setDevCode(null);
           }}
           className="mt-3 w-full text-xs text-white/50 hover:text-white/80"
         >
-          ← Use a different number
+          ← Use a different {channelUsed === "email" ? "email" : "number"}
         </button>
       </form>
     );
   }
 
   return (
-    <form
-      onSubmit={handlePhoneSubmit}
-      className="card rounded-2xl p-6 text-left"
-    >
-      <label
-        htmlFor="phone"
-        className="mb-2 block text-xs font-semibold uppercase tracking-widest text-white/60"
-      >
-        Mobile number (US only)
-      </label>
-      <div className="flex items-stretch gap-2">
-        <span className="input grid place-items-center rounded-xl px-3 text-sm text-white/70">
-          +1
-        </span>
-        <input
-          id="phone"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel-national"
-          required
-          value={phone}
-          onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
-          className="input w-full rounded-xl px-4 py-3 text-base"
-          placeholder="(555) 555-5555"
-        />
-      </div>
+    <form onSubmit={handleInputSubmit} className="card rounded-2xl p-6 text-left">
+      {CHANNEL === "email" ? (
+        <>
+          <label
+            htmlFor="email"
+            className="mb-2 block text-xs font-semibold uppercase tracking-widest text-white/60"
+          >
+            Email address
+          </label>
+          <input
+            id="email"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="input w-full rounded-xl px-4 py-3 text-base"
+            placeholder="you@example.com"
+          />
+        </>
+      ) : (
+        <>
+          <label
+            htmlFor="phone"
+            className="mb-2 block text-xs font-semibold uppercase tracking-widest text-white/60"
+          >
+            Mobile number (US only)
+          </label>
+          <div className="flex items-stretch gap-2">
+            <span className="input grid place-items-center rounded-xl px-3 text-sm text-white/70">
+              +1
+            </span>
+            <input
+              id="phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel-national"
+              required
+              value={phone}
+              onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
+              className="input w-full rounded-xl px-4 py-3 text-base"
+              placeholder="(555) 555-5555"
+            />
+          </div>
+        </>
+      )}
 
       <label className="mt-4 flex items-start gap-3 text-xs text-white/60">
         <input
@@ -186,9 +220,13 @@ export default function SignupCard() {
           className="mt-0.5 h-4 w-4 accent-yellow-300"
         />
         <span>
-          I agree to receive recurring automated text alerts about Pokémon TCG
-          drops. Msg &amp; data rates may apply. Reply{" "}
-          <span className="font-mono text-white/80">STOP</span> to cancel.
+          I agree to receive automated drop alerts about Pokémon TCG releases.
+          {CHANNEL === "sms" && (
+            <>
+              {" "}Msg &amp; data rates may apply. Reply{" "}
+              <span className="font-mono text-white/80">STOP</span> to cancel.
+            </>
+          )}
         </span>
       </label>
 
@@ -200,7 +238,7 @@ export default function SignupCard() {
 
       <button
         type="submit"
-        disabled={loading || phone.replace(/\D/g, "").length !== 10}
+        disabled={loading || !inputReady}
         className="btn-primary mt-5 w-full rounded-xl px-4 py-3"
       >
         {loading ? "Sending code…" : "Get drop alerts"}

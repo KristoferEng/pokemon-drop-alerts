@@ -8,12 +8,14 @@ import {
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const subscribers = pgTable(
   "subscribers",
   {
     id: serial("id").primaryKey(),
-    phone: text("phone").notNull(),
+    phone: text("phone"),
+    email: text("email"),
     verified: boolean("verified").notNull().default(false),
     optedInAt: timestamp("opted_in_at", { withTimezone: true }),
     optInIp: text("opt_in_ip"),
@@ -24,7 +26,12 @@ export const subscribers = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    phoneUnique: uniqueIndex("subscribers_phone_unique").on(t.phone),
+    phoneUnique: uniqueIndex("subscribers_phone_unique")
+      .on(t.phone)
+      .where(sql`${t.phone} IS NOT NULL`),
+    emailUnique: uniqueIndex("subscribers_email_unique")
+      .on(t.email)
+      .where(sql`${t.email} IS NOT NULL`),
   }),
 );
 
